@@ -49,15 +49,7 @@ final_output_list = []
 # ============================================================
 
 import csv
-# -------------------------------------
-# openai が未インストール時のみ pip install
-# -------------------------------------
-try:
-    import anthropic  # noqa: F401
-except ImportError:
-    !pip install -q anthropic
-    import anthropic  # noqa: F401
-
+import anthropic
 import json
 import re
 from pathlib import Path
