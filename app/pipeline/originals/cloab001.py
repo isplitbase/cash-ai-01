@@ -134,16 +134,23 @@ if not DATA_PATH.exists():
 with DATA_PATH.open(encoding="utf-8") as f:
     source_data = json.load(f)
 
-logger.error("===== DEBUG START =====")
-logger.error("keys=%s", list(source_data.keys()))
-logger.error("len(製造原価)=%s", len(source_data.get("製造原価", [])))
-logger.error("len(販売費)=%s", len(source_data.get("販売費", [])))
-logger.error("PL names sample=%s", [x.get("勘定科目") for x in source_data.get("PL", [])[:20]])
-logger.error(
-    "製造原価 分類 sample=%s",
-    [(x.get("勘定科目"), x.get("分類")) for x in source_data.get("製造原価", [])[:20]]
-)
-logger.error("===== DEBUG END =====")
+debug_info = {
+    "no": 9999,
+    "name": "DEBUG_LOG",
+    "今期": 0,
+    "前期": 0,
+    "前々期": 0,
+    "内訳": {
+        "keys": list(source_data.keys()),
+        "len_製造原価": len(source_data.get("製造原価", [])),
+        "len_販売費": len(source_data.get("販売費", [])),
+        "PL_names_sample": [x.get("勘定科目") for x in source_data.get("PL", [])[:10]],
+        "製造原価_sample": [
+            {"name": x.get("勘定科目"), "分類": x.get("分類")}
+            for x in source_data.get("製造原価", [])[:10]
+        ]
+    }
+}
 
 # 全データを統合するリスト
 final_output_list = []
@@ -2612,7 +2619,7 @@ for no in sorted(data_map.keys()):
             row[f"{p}構成比"] = calc_ratio(v, total)
 
     sorted_rows.append(row)
-
+sorted_rows.append(debug_info)
 # --- 5. 保存 ---
 with Path("output.json").open("w", encoding="utf-8") as f:
     json.dump(sorted_rows, f, ensure_ascii=False, indent=2)
