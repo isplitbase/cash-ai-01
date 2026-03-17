@@ -134,16 +134,16 @@ if not DATA_PATH.exists():
 with DATA_PATH.open(encoding="utf-8") as f:
     source_data = json.load(f)
 
-logger.info("===== DEBUG START =====")
-logger.info("keys=%s", list(source_data.keys()))
-logger.info("len(製造原価)=%s", len(source_data.get("製造原価", [])))
-logger.info("len(販売費)=%s", len(source_data.get("販売費", [])))
-logger.info("PL names sample=%s", [x.get("勘定科目") for x in source_data.get("PL", [])[:20]])
-logger.info(
+logger.error("===== DEBUG START =====")
+logger.error("keys=%s", list(source_data.keys()))
+logger.error("len(製造原価)=%s", len(source_data.get("製造原価", [])))
+logger.error("len(販売費)=%s", len(source_data.get("販売費", [])))
+logger.error("PL names sample=%s", [x.get("勘定科目") for x in source_data.get("PL", [])[:20]])
+logger.error(
     "製造原価 分類 sample=%s",
     [(x.get("勘定科目"), x.get("分類")) for x in source_data.get("製造原価", [])[:20]]
 )
-logger.info("===== DEBUG END =====")
+logger.error("===== DEBUG END =====")
 
 # 全データを統合するリスト
 final_output_list = []
