@@ -2619,7 +2619,7 @@ for no in sorted(data_map.keys()):
             row[f"{p}構成比"] = calc_ratio(v, total)
 
     sorted_rows.append(row)
-sorted_rows.append(debug_info)
+#sorted_rows.append(debug_info)
 # --- 5. 保存 ---
 with Path("output.json").open("w", encoding="utf-8") as f:
     json.dump(sorted_rows, f, ensure_ascii=False, indent=2)
