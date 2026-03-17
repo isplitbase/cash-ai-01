@@ -184,10 +184,10 @@ system_prompt = """
 4. 出力順序の固定：各行は必ず「行番号｜勘定科目｜前々期｜前期｜今期｜区分｜集計方法」の順で出力し、列の順番を絶対に入れ替えないでください。
 5. 金額が空文字、null、または存在しない場合は 0 としてください。
 【出力フォーマットに関して、次のルールを絶対に守ってください】
-1. 出力は 78行のテキストのみとし、それ以外の行や説明文、空行、コメントは一切出力してはいけません。
+1. 出力は 81行のテキストのみとし、それ以外の行や説明文、空行、コメントは一切出力してはいけません。
 2. 各行は次の形式とします（カンマではなく全角の縦棒「｜」で区切る）：
    行番号｜勘定科目｜前々期｜前期｜今期｜区分｜集計方法
-3. 行番号は 1 〜 78 の整数とし、1 行目は 1、2 行目は 2、…、78行目は 78 です。
+3. 行番号は 1 〜 78 の整数（ただし行33は33.1, 33.2, 33.3, 33.4の4行に分割）とし、合計81行です。
 4. 「前々期」「前期」「今期」は整数のみとし、カンマ区切りや単位（円、千円など）は付けません。金額が無い場合は 0 とします。
 5. 「区分」は、変動費なら "V"、固定費なら "F"、該当しない行は空文字 "" とします。
 6. 区切り文字として使用する全角縦棒「｜」は、フィールドの中（特に「集計方法」）では絶対に使わないでください。
@@ -226,13 +226,13 @@ spec_text = """
 - JSON 内に「合計」行（例：流動資産合計、固定資産合計、資産合計、負債合計、株主資本合計、純資産合計、製造原価合計など）がある場合、それを利用する。自動計算は禁止。
 
 ■出力形式（重要）
-- あなたの出力は 78 行のテキストのみです。
+- あなたの出力は 81 行のテキストのみです。
 - 各行の形式：
   行番号｜勘定科目｜今期｜前期｜前々期｜区分｜集計方法
 - 区切りはすべて全角の縦棒「｜」とし、フィールド内では使用しないでください。
 - 「集計方法」は日本語の文章で構いませんが、「｜」は使用禁止です。
 - 「区分」は変動費なら "V"、固定費なら "F"、それ以外の行は ""（空文字）とします。
-- 行番号は 1〜78で、行番号順に並べてください。
+- 行番号は 1〜78（33.1〜33.4を含む計81行）で、行番号順に並べてください。
 
 ------------------------------------------------------------
 ■1〜78 行：BS（貸借対照表）
@@ -285,7 +285,11 @@ spec_text = """
 30,建設仮勘定
 31,その他有形固定資産
 32,有形固定資産小計,""
-33,無形固定資産小計
+33.1〜33.3,無形固定資産スロット1〜3,
+- 「分類＝無形固定資産」に属する個別科目（合計行を除く）を対象とする。
+- 個別科目が1〜2件の場合: 33.1, 33.2に1科目ずつ配置し、残りスロットは勘定科目を空文字、金額を0とする。
+- 個別科目が3件以上の場合: 33.1, 33.2に先頭2科目を配置し、33.3は勘定科目を「その他無形固定資産」として3件目以降の金額をすべて合算する。集計方法には合算した科目名を記載。
+33.4,無形固定資産小計,33.1〜33.3の合計。集計方法には合算した科目名を記載。
 ------------------------------------------------------------
 ■34〜42 行：投資その他の資産
 ------------------------------------------------------------
@@ -353,7 +357,7 @@ spec_text = """
 # -----------------------------
 user_prompt = (
     "以下が元データ(JSON)です。この BS および製造原価関連データを、直前の仕様にしたがって 1〜78 行に集計してください。\n"
-    "出力は必ず 78 行のテキストのみとし、各行を「行番号｜勘定科目｜今期｜前期｜前々期｜区分｜集計方法」の形式で出力してください。\n"
+    "出力は必ず 81 行のテキストのみとし、各行を「行番号｜勘定科目｜今期｜前期｜前々期｜区分｜集計方法」の形式で出力してください。\n"
     "ヘッダ行や説明文は絶対に出力しないでください。\n"
     "=== 元データ(JSON) ===\n"
     "<JSON_START>\n"
@@ -391,19 +395,19 @@ if not raw_text.strip():
 lines = []
 for line in raw_text.splitlines():
     l = line.strip()
-    if re.match(r"^\d{1,3}｜", l):
+    if re.match(r"^\d{1,3}(?:\.\d)?｜", l):
         lines.append(l)
 
-if len(lines) != 78:
+if len(lines) != 81:
     print(raw_text)
-    raise ValueError(f"行数が78行ではありません（{len(lines)}行）。")
+    raise ValueError(f"行数が81行ではありません（{len(lines)}行）。")
 
 # ============================================================
 # 1〜78行のみ表示して終了
 # ============================================================
 
 print("=== 1〜78行のみ表示 ===")
-for l in lines[:78]:
+for l in lines[:81]:
     print(l)
 
 print("=== 79行目以降は出力処理を削除済み ===")
@@ -418,13 +422,13 @@ rows_1_78_for_json = []
 # --- Step A: 一旦すべての行を辞書に格納（再計算しやすくするため） ---
 row_data_map = {}
 
-for l in lines[:78]:
+for l in lines[:81]:
     parts = l.split("｜", 6)
     if len(parts) != 7:
         continue
 
     try:
-        row_num = int(parts[0])
+        row_num = float(parts[0]) if "." in parts[0] else int(parts[0])
         val_konki = int(parts[2])
         val_zenki = int(parts[3])
         val_zenzenki = int(parts[4])
@@ -441,7 +445,7 @@ for l in lines[:78]:
         "集計方法": parts[6]
     }
 # --- Step A2: 1〜78行を必ず存在させる（空行でも出力） ---
-for i in range(1, 79):
+for i in list(range(1, 79)) + [33.1, 33.2, 33.3, 33.4]:
     if i not in row_data_map:
         row_data_map[i] = {
             "勘定科目": "",
@@ -451,6 +455,10 @@ for i in range(1, 79):
             "区分": "",
             "集計方法": ""
         }
+
+# row 33 (int) is replaced by 33.1-33.4; remove int 33
+if 33.1 in row_data_map and 33 in row_data_map:
+    del row_data_map[33]
 
 # --- Step B: 行6（当座資産合計）の補完ロジック修正版 ---
 if 6 in row_data_map:
@@ -525,7 +533,7 @@ if 42 in row_data_map:
 
 # --- Step C: 出力用リストへの変換 ---
 # すべてのキーを強制的に int に変換してソートする（文字列が混ざっていても比較可能にする）
-for row_num in sorted(row_data_map.keys(), key=lambda x: int(x)):
+for row_num in sorted(row_data_map.keys(), key=lambda x: float(x)):
     d = row_data_map[row_num]
 
     # JSON用
@@ -1985,7 +1993,7 @@ v40 = get_vals(40)
 for j in range(3): res42[j] -= abs(v40[j])
 set_vals(42, res42)
 
-set_vals(44, [sum(x) for x in zip(get_vals(32), get_vals(33), get_vals(42))])
+set_vals(44, [sum(x) for x in zip(get_vals(32), get_vals(33.4), get_vals(42))])
 set_vals(45, [sum(x) for x in zip(get_vals(23), get_vals(44), get_vals(43))])
 
 res56 = [0, 0, 0]
@@ -2492,7 +2500,7 @@ if 153 in row_dict:
 
 
 # 出力
-final_rows = [row_dict[i] for i in sorted(row_dict.keys())]
+final_rows = [row_dict[i] for i in sorted(row_dict.keys(), key=lambda x: float(x))]
 with Path("79_154.json").open("w", encoding="utf-8") as f:
     json.dump(final_rows, f, ensure_ascii=False, indent=2)
 with Path("79_154.csv").open("w", encoding="cp932", newline="") as f:
@@ -2506,7 +2514,7 @@ print("販管費の集計範囲を修正し、再計算を完了しました。"
 # 79〜154行目の結果を統合用リストに追加します
 # ファイルの最後の方にある「row_dict」からデータを取り出します
 try:
-    for row_num in sorted(row_dict.keys()):
+    for row_num in sorted(row_dict.keys(), key=lambda x: float(x)):
         # すでにfinal_output_listにある行番号と重複しないように追加
         final_output_list.append(row_dict[row_num])
 except NameError:
@@ -2524,7 +2532,7 @@ for item in final_output_list:
         unique_list.append(item)
         seen_rows.add(item["行番号"])
 
-unique_list.sort(key=lambda x: int(x["行番号"]))
+unique_list.sort(key=lambda x: float(x["行番号"]))
 
 # output.json として保存
 OUTPUT_FILE = "output.json"
@@ -2551,7 +2559,7 @@ def calc_ratio(val, total):
     return round((val / total) * 100, 2)
 
 
-data_map = {int(row["行番号"]): row for row in final_output_list}
+data_map = {float(row["行番号"]): row for row in final_output_list}
 
 def get_v(no, p):
     """特定の行・期間の数値を取得"""
