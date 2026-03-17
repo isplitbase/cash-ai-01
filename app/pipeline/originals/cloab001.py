@@ -124,6 +124,12 @@ if not DATA_PATH.exists():
 with DATA_PATH.open(encoding="utf-8") as f:
     source_data = json.load(f)
 
+print("keys=", source_data.keys())
+print("len(製造原価)=", len(source_data.get("製造原価", [])))
+print("len(販売費)=", len(source_data.get("販売費", [])))
+print("PL names sample=", [x.get("勘定科目") for x in source_data.get("PL", [])[:20]])
+print("製造原価 分類 sample=", [(x.get("勘定科目"), x.get("分類")) for x in source_data.get("製造原価", [])[:20]])
+
 # 全データを統合するリスト
 final_output_list = []
 
