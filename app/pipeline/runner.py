@@ -53,8 +53,8 @@ def run_001_002_003(payload: Dict[str, Any]) -> Dict[str, Any]:
     data_json = {
         "BS": payload.get("BS", []),
         "PL": payload.get("PL", []),
-        "販売費": payload.get("SGA", []),
-        "製造原価": payload.get("MFG", []),
+        "販売費": payload.get("販売費", []),
+        "製造原価": payload.get("製造原価", []),
     }
 
     run_dir = Path(tempfile.mkdtemp(prefix="cashai_", dir="/tmp"))
