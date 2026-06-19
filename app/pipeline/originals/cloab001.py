@@ -122,7 +122,7 @@ def _get_amount_triplet(item: dict) -> list:
 # -----------------------------
 # 1. 共通設定（そのまま使ってください）
 # -----------------------------
-MODEL = "claude-sonnet-4-20250514"
+MODEL = "claude-sonnet-4-6"
 api_key = userdata.get('ANTHROPIC_API_KEY')
 if not api_key:
     raise RuntimeError("Colabの[ユーザーシークレット]に'ANTHROPIC_API_KEY'を登録してください。")
@@ -177,7 +177,7 @@ import anthropic
 # -----------------------------
 # 設定
 # -----------------------------
-MODEL = "claude-sonnet-4-20250514"
+MODEL = "claude-sonnet-4-6"
 
 api_key = userdata.get('ANTHROPIC_API_KEY')
 if not api_key:
@@ -625,7 +625,7 @@ import anthropic
 # -----------------------------
 # 設定
 # -----------------------------
-MODEL = "claude-sonnet-4-20250514"
+MODEL = "claude-sonnet-4-6"
 
 # Colab のユーザーシークレットから API キー取得
 api_key = userdata.get('ANTHROPIC_API_KEY')
