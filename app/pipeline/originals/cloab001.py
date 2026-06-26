@@ -204,6 +204,9 @@ debug_info = {
 # 全データを統合するリスト
 final_output_list = []
 
+# レスポンス(output.json)に含める処理ログ（引当金の部 補完など）
+_process_log = []
+
 # ============================================================
 # 【A】 1〜78行目の処理をここに入れる
 # ============================================================
@@ -2103,21 +2106,24 @@ def _find_input_total_triplet(target_norm):
             return _get_amount_triplet(it)
     return None
 
+def _find_input_section_triplet(target_norm):
+    """入力BSから、勘定科目名が target_norm に正規化一致するセクション見出し行の値[今,前,前々]と名称を返す。無ければNone。
+       例: target_norm="引当金" → 勘定科目「引当金の部/引当金合計/引当金計/引当金部/引当金」の行。
+       ※分類ではなく勘定科目で判定（製品保証引当金等の個別科目を誤って拾わないため）。"""
+    for it in source_data.get("BS", []):
+        if _norm_liab_header(it.get("勘定科目", "")) == target_norm:
+            return _get_amount_triplet(it), str(it.get("勘定科目", "") or "").strip()
+    return None, None
+
 _input_fusai_total = _find_input_total_triplet("負債")  # 負債合計/負債の部合計 等
 if _input_fusai_total is not None:
     v56 = get_vals(56)
     v64 = get_vals(64)
     _hikiate_residual = [_input_fusai_total[j] - v56[j] - v64[j] for j in range(3)]
     if any(r != 0 for r in _hikiate_residual):
-        # 入力に「引当金（の部/合計/計/部）」セクションがあれば、その名称を採用（無ければ既定名）
-        _hikiate_name = "引当金の部"
-        for it in source_data.get("BS", []):
-            if (_norm_liab_header(it.get("分類", "")) == "引当金"
-                    or _norm_liab_header(it.get("勘定科目", "")) == "引当金"):
-                _nm = str(it.get("勘定科目", "") or "").strip()
-                if _nm:
-                    _hikiate_name = _nm
-                break
+        # 入力に「引当金（の部/合計/計/部）」セクションがあれば、その名称・値を採用（クロスチェック用）
+        _found_vals, _found_name = _find_input_section_triplet("引当金")
+        _hikiate_name = _found_name if _found_name else "引当金の部"
         # 空いている固定負債スロット(57〜63)に明細として配置（表示・透明性のため）
         _placed_slot = None
         for slot in range(57, 64):
@@ -2131,8 +2137,21 @@ if _input_fusai_total is not None:
         # 固定負債合計(64)・負債合計(65)に残差を反映（明細スロットの有無に関わらず整合させる）
         set_vals(64, [v64[j] + _hikiate_residual[j] for j in range(3)])
         set_vals(65, [get_vals(56)[j] + get_vals(64)[j] for j in range(3)])
-        print(f"[引当金の部 補完] 名称={_hikiate_name} 残差(今/前/前々)={_hikiate_residual} "
-              f"配置スロット={_placed_slot if _placed_slot else '無し(64/65のみ反映)'}")
+
+        # --- クロスチェック：残差(計算値) と 入力の引当金行(直接値) の突き合わせ ---
+        _xcheck = "入力に引当金セクション行が見つからず（残差のみで補完）"
+        if _found_vals is not None:
+            _diff = [_hikiate_residual[j] - _found_vals[j] for j in range(3)]
+            if all(d == 0 for d in _diff):
+                _xcheck = f"一致OK（入力「{_found_name}」={_found_vals[0]} と残差が一致）"
+            else:
+                _xcheck = (f"⚠不一致：入力「{_found_name}」={_found_vals[0]} vs 残差={_hikiate_residual[0]} "
+                           f"差={_diff[0]}（要確認：負債合計/流動/固定のいずれかにOCR誤差の可能性）")
+
+        _msg = (f"引当金の部 補完：名称={_hikiate_name}／残差(今/前/前々)={_hikiate_residual}／"
+                f"配置スロット={_placed_slot if _placed_slot else '無し(64・65のみ反映)'}／{_xcheck}")
+        _process_log.append(_msg)
+        print(f"[引当金の部 補完] {_msg}")
 
 set_vals(71, [sum(x) for x in zip(get_vals(66), get_vals(67), get_vals(68))])
 v71, v72, v73 = get_vals(71), get_vals(72), get_vals(73)
@@ -2772,6 +2791,21 @@ for no in sorted(data_map.keys()):
 
     sorted_rows.append(row)
 #sorted_rows.append(debug_info)
+
+# --- 処理ログをレスポンス(output.json)に含める（引当金の部 補完など）---
+#   金額ゼロのログ行として末尾に追加。cash-ai-02 は金額ゼロ行をCF対象外＝未割当て判定からも除外するため安全。
+#   _section_for_row は適用済みループの外で追加するので、分類は上書きされない。
+for _li, _logmsg in enumerate(_process_log):
+    sorted_rows.append({
+        "行番号": 9001 + _li,
+        "勘定科目": "【補完ログ】",
+        "前々期": 0, "前期": 0, "今期": 0,
+        "区分": "",
+        "集計方法": _logmsg,
+        "分類": "ログ",
+        "前々期構成比": 0.0, "前期構成比": 0.0, "今期構成比": 0.0,
+    })
+
 # --- 5. 保存 ---
 with Path("output.json").open("w", encoding="utf-8") as f:
     json.dump(sorted_rows, f, ensure_ascii=False, indent=2)
