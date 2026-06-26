@@ -2092,67 +2092,6 @@ verify_total(64, "固定負債合計", calc64, range(57, 64))
 
 set_vals(65, [sum(x) for x in zip(get_vals(56), get_vals(64))])
 
-# ============================================================
-# 「引当金の部」取りこぼし対策（旧商法式BS：負債=流動／固定／引当金の部の3区分）
-# 流動負債合計(56)＋固定負債合計(64) と 入力の権威ある負債合計 がズレる場合、
-# その差額（＝引当金の部などの未分類負債）を固定負債側に補完して整合させる。
-#   ・残差ベース（名前非依存）で必ず捕捉 → 「引当金合計/引当金計/引当金部」等の表記ゆれにも自動対応
-#   ・固定負債合計(64)に含めることで cash-ai-02 の c22(その他固定負債) がそのまま捕捉
-# ============================================================
-def _find_input_total_triplet(target_norm):
-    """入力BSから target_norm（例:"負債"）に正規化一致する合計行の[今,前,前々]を返す。無ければNone。"""
-    for it in source_data.get("BS", []):
-        if _norm_liab_header(it.get("勘定科目", "")) == target_norm:
-            return _get_amount_triplet(it)
-    return None
-
-def _find_input_section_triplet(target_norm):
-    """入力BSから、勘定科目名が target_norm に正規化一致するセクション見出し行の値[今,前,前々]と名称を返す。無ければNone。
-       例: target_norm="引当金" → 勘定科目「引当金の部/引当金合計/引当金計/引当金部/引当金」の行。
-       ※分類ではなく勘定科目で判定（製品保証引当金等の個別科目を誤って拾わないため）。"""
-    for it in source_data.get("BS", []):
-        if _norm_liab_header(it.get("勘定科目", "")) == target_norm:
-            return _get_amount_triplet(it), str(it.get("勘定科目", "") or "").strip()
-    return None, None
-
-_input_fusai_total = _find_input_total_triplet("負債")  # 負債合計/負債の部合計 等
-if _input_fusai_total is not None:
-    v56 = get_vals(56)
-    v64 = get_vals(64)
-    _hikiate_residual = [_input_fusai_total[j] - v56[j] - v64[j] for j in range(3)]
-    if any(r != 0 for r in _hikiate_residual):
-        # 入力に「引当金（の部/合計/計/部）」セクションがあれば、その名称・値を採用（クロスチェック用）
-        _found_vals, _found_name = _find_input_section_triplet("引当金")
-        _hikiate_name = _found_name if _found_name else "引当金の部"
-        # 空いている固定負債スロット(57〜63)に明細として配置（表示・透明性のため）
-        _placed_slot = None
-        for slot in range(57, 64):
-            r = row_dict.get(slot, {})
-            if not str(r.get("勘定科目", "") or "").strip() and all(x == 0 for x in get_vals(slot)):
-                row_dict[slot]["勘定科目"] = _hikiate_name
-                set_vals(slot, _hikiate_residual)
-                row_dict[slot]["集計方法"] = "引当金の部（負債合計−流動−固定の残差で補完）"
-                _placed_slot = slot
-                break
-        # 固定負債合計(64)・負債合計(65)に残差を反映（明細スロットの有無に関わらず整合させる）
-        set_vals(64, [v64[j] + _hikiate_residual[j] for j in range(3)])
-        set_vals(65, [get_vals(56)[j] + get_vals(64)[j] for j in range(3)])
-
-        # --- クロスチェック：残差(計算値) と 入力の引当金行(直接値) の突き合わせ ---
-        _xcheck = "入力に引当金セクション行が見つからず（残差のみで補完）"
-        if _found_vals is not None:
-            _diff = [_hikiate_residual[j] - _found_vals[j] for j in range(3)]
-            if all(d == 0 for d in _diff):
-                _xcheck = f"一致OK（入力「{_found_name}」={_found_vals[0]} と残差が一致）"
-            else:
-                _xcheck = (f"⚠不一致：入力「{_found_name}」={_found_vals[0]} vs 残差={_hikiate_residual[0]} "
-                           f"差={_diff[0]}（要確認：負債合計/流動/固定のいずれかにOCR誤差の可能性）")
-
-        _msg = (f"引当金の部 補完：名称={_hikiate_name}／残差(今/前/前々)={_hikiate_residual}／"
-                f"配置スロット={_placed_slot if _placed_slot else '無し(64・65のみ反映)'}／{_xcheck}")
-        _process_log.append(_msg)
-        print(f"[引当金の部 補完] {_msg}")
-
 set_vals(71, [sum(x) for x in zip(get_vals(66), get_vals(67), get_vals(68))])
 v71, v72, v73 = get_vals(71), get_vals(72), get_vals(73)
 set_vals(74, [v71[j] - abs(v72[j]) + v73[j] for j in range(3)])
@@ -2710,6 +2649,62 @@ def get_v(no, p):
     return to_f(data_map.get(no, {}).get(p, 0))
 
 periods = ["前々期", "前期", "今期"]
+
+# ============================================================
+# 「引当金の部」取りこぼし対策（旧商法式BS：負債=流動／固定／引当金の部 の3区分）
+#   負債合計(65) は権威値（引当金の部を含む）だが、流動(56)＋固定(64) には引当金の部が
+#   入らず、下流(cash-ai-02)が明細合算でCFを作る際に取りこぼす。
+#   残差 = 負債合計(65) − 流動(56) − 固定(64) を算出し、空の固定負債スロット(57〜63)に
+#   明細配置＋固定負債合計(64)に加算（65は権威値なので変更しない）。
+#   ・残差ベース（名前非依存）＝「引当金合計/引当金計/引当金部」等の表記ゆれにも自動対応
+#   ・固定負債合計(64)に含めることで cash-ai-02 の c22(その他固定負債) がそのまま捕捉
+#   ※ data_map には BS行(1〜78)が揃っているのでここで実行する（row_dict は81〜154のみ）
+# ============================================================
+_v65 = {p: get_v(65.0, p) for p in periods}   # 負債合計（権威値・引当金の部を含む）
+_v56 = {p: get_v(56.0, p) for p in periods}   # 流動負債合計
+_v64 = {p: get_v(64.0, p) for p in periods}   # 固定負債合計
+_resid = {p: _v65[p] - _v56[p] - _v64[p] for p in periods}
+if (65.0 in data_map) and any(abs(_resid[p]) > 0 for p in periods):
+    # 名称・クロスチェック用：入力BSから「引当金（の部/合計/計/部）」見出し行を探す（勘定科目名で判定）
+    _found_vals, _found_name = (None, None)
+    for _it in source_data.get("BS", []):
+        if _norm_liab_header(_it.get("勘定科目", "")) == "引当金":
+            _found_vals = _get_amount_triplet(_it)  # [今, 前, 前々]
+            _found_name = str(_it.get("勘定科目", "") or "").strip()
+            break
+    _hikiate_name = _found_name if _found_name else "引当金の部"
+    # 空の固定負債スロット(57〜63)に明細として配置（分類は後段の _section_for_row が「固定負債」を付与）
+    _placed_slot = None
+    for _slot in range(57, 64):
+        _r = data_map.get(float(_slot))
+        if _r is not None and not str(_r.get("勘定科目", "") or "").strip() \
+           and all(to_f(_r.get(p, 0)) == 0 for p in periods):
+            _r["勘定科目"] = _hikiate_name
+            for p in periods:
+                _r[p] = _resid[p]
+            _r["集計方法"] = "引当金の部（負債合計−流動−固定の残差で補完）"
+            _placed_slot = _slot
+            break
+    # 固定負債合計(64) に残差を加算（65=負債合計 は権威値なので変更しない）
+    _r64 = data_map.get(64.0)
+    if _r64 is not None:
+        for p in periods:
+            _r64[p] = to_f(_r64.get(p, 0)) + _resid[p]
+    # クロスチェック：残差(計算値) と 入力の引当金見出し行(直接値) を突き合わせ
+    _xcheck = "入力に引当金セクション見出し行が見つからず（残差のみで補完）"
+    if _found_vals is not None:
+        _fv = {"今期": _found_vals[0], "前期": _found_vals[1], "前々期": _found_vals[2]}
+        _diff = {p: _resid[p] - _fv[p] for p in periods}
+        if all(_diff[p] == 0 for p in periods):
+            _xcheck = f"一致OK（入力「{_found_name}」今期={_fv['今期']} と残差が一致）"
+        else:
+            _xcheck = (f"⚠不一致：入力「{_found_name}」今期={_fv['今期']} vs 残差今期={_resid['今期']} "
+                       f"差={_diff['今期']}（要確認：負債合計/流動/固定にOCR誤差の可能性）")
+    _msg = (f"引当金の部 補完：名称={_hikiate_name}／残差(今/前/前々)="
+            f"[{_resid['今期']:.0f}, {_resid['前期']:.0f}, {_resid['前々期']:.0f}]／"
+            f"配置スロット={_placed_slot if _placed_slot else '無し(64のみ加算)'}／{_xcheck}")
+    _process_log.append(_msg)
+    print(f"[引当金の部 補完] {_msg}")
 
 # ============================================================
 # ★追加：行番号→「分類」（CFセクション集計用）と「区分」(F/V)既定値の付与
