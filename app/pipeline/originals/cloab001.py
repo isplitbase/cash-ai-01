@@ -2633,10 +2633,65 @@ def get_v(no, p):
 
 periods = ["前々期", "前期", "今期"]
 
+# ============================================================
+# ★追加：行番号→「分類」（CFセクション集計用）と「区分」(F/V)既定値の付与
+#   cash-ai-01 は固定テンプレートのため、行番号でセクションが一意に決まる。
+#   下流(cash-ai-02)のCF計算は「分類」でセクション集計するため、ここで確実に付与する。
+# ============================================================
+def _section_for_row(no):
+    """行番号→分類（流動資産/固定資産系/負債/純資産/製造原価/販管費/損益計算書）"""
+    try:
+        n = float(no)
+    except Exception:
+        return ""
+    if 1 <= n <= 23:    return "流動資産"
+    if 24 <= n <= 32:   return "有形固定資産"
+    if 33 <= n < 34:    return "無形固定資産"        # 33.1〜33.4
+    if 34 <= n <= 42:   return "投資その他の資産"
+    if n == 43:         return "繰延資産"
+    # 44=固定資産合計 は総計行（_VALID_UNUSED_PATTERNSで除外）のため分類は空
+    if 46 <= n <= 56:   return "流動負債"
+    if 57 <= n <= 64:   return "固定負債"
+    if 66 <= n <= 75:   return "純資産"
+    if 81 <= n <= 111:  return "製造原価"
+    # --- P/L：cash-ai-02 の _COVERED_SECTIONS に一致する正式名を使う ---
+    if n == 112:        return "売上高"
+    if 113 <= n <= 120: return "売上原価"          # 売上原価の内訳・売上総利益(総計判定で除外)
+    if 121 <= n <= 139: return "販売費及び一般管理費"
+    if 141 <= n <= 145: return "営業外収益"
+    if 146 <= n <= 148: return "営業外費用"
+    if n == 150:        return "特別利益"
+    if n == 151:        return "特別損失"
+    if n == 153:        return "法人税等"
+    # 45資産合計・65負債合計・76〜78(照合/割引/裏書)・140/149/152/154(利益総計) 等は空
+    return ""
+
+def _kubun_default_for_row(no):
+    """区分(F/V)が空のときの既定値。総計/小計行には付けない（BEPの二重計上回避）。
+       変動費(V): 材料費明細(81-83)・外注加工費(91)／固定費(F): その他製造原価明細・販管費明細。
+       ※あくまで既定値。変動PL＆BEP画面でF/V切替可能。"""
+    try:
+        n = float(no)
+    except Exception:
+        return ""
+    if n in (84, 89, 105, 111, 119, 120, 139):  return ""   # 合計/小計行
+    if n in (81, 82, 83, 91):                    return "V"  # 材料費明細・外注加工費＝変動費
+    if 85 <= n <= 111:                           return "F"  # その他の製造原価明細＝固定費
+    if 121 <= n <= 138:                          return "F"  # 販管費明細＝固定費（spec準拠）
+    return ""
+
 # --- 4. 全行の構成比を再計算 (79, 80行の追加処理を削除) ---
 sorted_rows = []
 for no in sorted(data_map.keys()):
     row = data_map[no]
+
+    # ★追加：分類（CFセクション集計用）を行番号から決定論的に付与
+    row["分類"] = _section_for_row(no)
+    # ★追加：区分(F/V)が空なら標準的な既定値を補完（BEP画面で変更可）
+    if not str(row.get("区分", "") or "").strip():
+        _kd = _kubun_default_for_row(no)
+        if _kd:
+            row["区分"] = _kd
 
     # セクションごとの分母設定
     if 1 <= no <= 45:
