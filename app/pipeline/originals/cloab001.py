@@ -146,6 +146,19 @@ def _normalize_account_name(name: str) -> str:
     name = name.replace("勘定科目", "").replace("科目", "")  # 「勘定科目」などの語句を除去
     return name
 
+def _norm_liab_header(s) -> str:
+    """負債セクションの見出し名を表記ゆれ込みで正規化する。
+    「引当金の部」「引当金合計」「引当金計」「引当金部」「引当金」→ すべて "引当金"。
+    「負債合計」「負債の部合計」→ "負債"。などの判定に使う。
+    """
+    t = _normalize_account_name(s)
+    # 括弧・記号を除去
+    for w in ("（", "）", "(", ")", "[", "]", "【", "】", "▲", "△", "・", "　", " "):
+        t = t.replace(w, "")
+    # 「の部」→「部」を先に処理してから、合計/小計/計/部 を順に除去
+    t = t.replace("の部", "").replace("合計", "").replace("小計", "").replace("計", "").replace("部", "")
+    return t
+
 def _get_amount_triplet(item: dict) -> list:
     """辞書から今期、前期、前々期の金額を整数で取得する。"""
     now_val = to_int_safe_bs(item.get("今期", {}).get("金額", 0) if isinstance(item.get("今期"), dict) else item.get("今期", 0))
@@ -2075,6 +2088,52 @@ for i in range(57, 64):
 verify_total(64, "固定負債合計", calc64, range(57, 64))
 
 set_vals(65, [sum(x) for x in zip(get_vals(56), get_vals(64))])
+
+# ============================================================
+# 「引当金の部」取りこぼし対策（旧商法式BS：負債=流動／固定／引当金の部の3区分）
+# 流動負債合計(56)＋固定負債合計(64) と 入力の権威ある負債合計 がズレる場合、
+# その差額（＝引当金の部などの未分類負債）を固定負債側に補完して整合させる。
+#   ・残差ベース（名前非依存）で必ず捕捉 → 「引当金合計/引当金計/引当金部」等の表記ゆれにも自動対応
+#   ・固定負債合計(64)に含めることで cash-ai-02 の c22(その他固定負債) がそのまま捕捉
+# ============================================================
+def _find_input_total_triplet(target_norm):
+    """入力BSから target_norm（例:"負債"）に正規化一致する合計行の[今,前,前々]を返す。無ければNone。"""
+    for it in source_data.get("BS", []):
+        if _norm_liab_header(it.get("勘定科目", "")) == target_norm:
+            return _get_amount_triplet(it)
+    return None
+
+_input_fusai_total = _find_input_total_triplet("負債")  # 負債合計/負債の部合計 等
+if _input_fusai_total is not None:
+    v56 = get_vals(56)
+    v64 = get_vals(64)
+    _hikiate_residual = [_input_fusai_total[j] - v56[j] - v64[j] for j in range(3)]
+    if any(r != 0 for r in _hikiate_residual):
+        # 入力に「引当金（の部/合計/計/部）」セクションがあれば、その名称を採用（無ければ既定名）
+        _hikiate_name = "引当金の部"
+        for it in source_data.get("BS", []):
+            if (_norm_liab_header(it.get("分類", "")) == "引当金"
+                    or _norm_liab_header(it.get("勘定科目", "")) == "引当金"):
+                _nm = str(it.get("勘定科目", "") or "").strip()
+                if _nm:
+                    _hikiate_name = _nm
+                break
+        # 空いている固定負債スロット(57〜63)に明細として配置（表示・透明性のため）
+        _placed_slot = None
+        for slot in range(57, 64):
+            r = row_dict.get(slot, {})
+            if not str(r.get("勘定科目", "") or "").strip() and all(x == 0 for x in get_vals(slot)):
+                row_dict[slot]["勘定科目"] = _hikiate_name
+                set_vals(slot, _hikiate_residual)
+                row_dict[slot]["集計方法"] = "引当金の部（負債合計−流動−固定の残差で補完）"
+                _placed_slot = slot
+                break
+        # 固定負債合計(64)・負債合計(65)に残差を反映（明細スロットの有無に関わらず整合させる）
+        set_vals(64, [v64[j] + _hikiate_residual[j] for j in range(3)])
+        set_vals(65, [get_vals(56)[j] + get_vals(64)[j] for j in range(3)])
+        print(f"[引当金の部 補完] 名称={_hikiate_name} 残差(今/前/前々)={_hikiate_residual} "
+              f"配置スロット={_placed_slot if _placed_slot else '無し(64/65のみ反映)'}")
+
 set_vals(71, [sum(x) for x in zip(get_vals(66), get_vals(67), get_vals(68))])
 v71, v72, v73 = get_vals(71), get_vals(72), get_vals(73)
 set_vals(74, [v71[j] - abs(v72[j]) + v73[j] for j in range(3)])
